@@ -10,7 +10,7 @@ import requests
 app = Flask(__name__)
 
 # --- تنظیمات و توکن ربات ---
-TOKEN = "GAPGPTMASKTOKEN6lp2g2qw50qX0X"  # توکن ربات بله
+TOKEN = "GAPGPTMASKTOKEN72fhck5gbhsX0X"  # توکن ربات بله
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 ADMIN_ID = 1708788049
 DB_FILE = "bot_database.json"
@@ -55,17 +55,104 @@ def send_message(chat_id, text, reply_markup=None):
     print(f"Error sending message: {e}")
 
 
-# --- مینی‌اپ و صفحات وب (Flask) ---
+# --- مینی‌اپ گرافیکی و تعاملی (Flask) ---
 @app.route("/")
 def home():
-  return "Bale Membergir Bot & Mini-App is Running! 🚀"
+  return "Bale Membergir Mini-App is Running! 🚀"
 
 
-@app.route("/webapp", methods=["GET"])
+@app.route("/webapp", methods=["GET", "POST"])
 def webapp():
   chat_id = request.args.get("chat_id")
+  if not chat_id:
+    return "❌ خطا: آیدی کاربر یافت نشد!"
+
   db = load_db()
-  user = db["users"].get(str(chat_id), {})
+  str_chat_id = str(chat_id)
+
+  # اگر کاربر هنوز ثبت‌نام نکرده بود، خودکار ثبت‌نامش کنیم
+  if str_chat_id not in db["users"]:
+    db["users"][str_chat_id] = {
+        "nickname": f"کاربر_{chat_id}",
+        "coins": 50,
+        "ref_by": None,
+        "last_spin": None,
+    }
+    save_db(db)
+
+  user = db["users"][str_chat_id]
+  message = ""
+
+  # پردازش اکشن‌های ارسال شده از مینی‌اپ
+  if request.method == "POST":
+    action = request.form.get("action")
+
+    if action == "setname":
+      new_name = request.form.get("nickname", "").strip()
+      if new_name:
+        user["nickname"] = new_name
+        save_db(db)
+        message = "✅ نام مستعار با موفقیت تغییر کرد!"
+
+    elif action == "spin":
+      last_spin = user.get("last_spin")
+      now = datetime.now()
+      can_spin = True
+      if last_spin:
+        last_time = datetime.fromisoformat(last_spin)
+        if now - last_time < timedelta(hours=24):
+          can_spin = False
+
+      if can_spin:
+        reward = random.randint(10, 100)
+        user["coins"] += reward
+        user["last_spin"] = now.isoformat()
+        save_db(db)
+        message = f"🎉 تبریک! {reward} سکه از گردونه جایزه گرفتی!"
+      else:
+        message = "⏳ گردونه شانس هر ۲۴ ساعت یک‌بار قابل چرخش است!"
+
+    elif action == "promo":
+      code = request.form.get("code", "").strip()
+      promo_codes = db.get("promo_codes", {})
+      if code in promo_codes:
+        p_data = promo_codes[code]
+        if p_data["uses"] > 0 and str_chat_id not in p_data["claimed_by"]:
+          p_data["uses"] -= 1
+          p_data["claimed_by"].append(str_chat_id)
+          user["coins"] += p_data["reward"]
+          save_db(db)
+          message = f"✅ کد هدیه اعمال شد! {p_data['reward']} سکه اضافه شد."
+        else:
+          message = "❌ این کد هدیه منقضی شده یا قبلاً استفاده شده است."
+      else:
+        message = "❌ کد هدیه نامعتبر است."
+
+    elif action == "order":
+      ch_link = request.form.get("channel", "").strip()
+      try:
+        count = int(request.form.get("count", 0))
+      except:
+        count = 0
+
+      cost = count * 2
+      if count > 0 and ch_link:
+        if user["coins"] >= cost:
+          user["coins"] -= cost
+          db["campaigns"].append({
+              "user_id": str_chat_id,
+              "channel": ch_link,
+              "requested": count,
+              "delivered": 0,
+          })
+          save_db(db)
+          message = (
+              f"✅ کمپین ممبر با موفقیت ثبت شد! {cost} سکه از حساب شما کسر گردید."
+          )
+        else:
+          message = "❌ موجودی سکه شما برای این تعداد ممبر کافی نیست!"
+      else:
+        message = "❌ اطلاعات سفارش نامعتبر است."
 
   html_template = """
     <!DOCTYPE html>
@@ -75,33 +162,81 @@ def webapp():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>مینی‌اپ ممبرگیر بله</title>
         <style>
-            body { font-family: Tahoma, sans-serif; background: #f4f7f6; margin: 0; padding: 15px; color: #333; }
-            .card { background: #fff; padding: 15px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 15px; }
-            h2 { color: #007bff; margin-top: 0; font-size: 18px; }
-            .info { font-size: 14px; color: #555; line-height: 1.6; }
-            .btn { background: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; font-size: 15px; cursor: pointer; margin-top: 5px; }
-            .highlight { color: #28a745; font-weight: bold; }
+            body { font-family: Tahoma, sans-serif; background: #f0f2f5; margin: 0; padding: 10px; color: #333; }
+            .card { background: #fff; padding: 15px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 12px; }
+            h2 { color: #007bff; margin-top: 0; font-size: 16px; border-bottom: 2px solid #f0f2f5; padding-bottom: 8px; }
+            .info { font-size: 13px; color: #555; line-height: 1.5; }
+            .btn { background: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; font-size: 14px; cursor: pointer; margin-top: 8px; font-weight: bold;}
+            .btn-success { background: #28a745; }
+            .btn-warning { background: #ffc107; color: #333; }
+            input, select { width: 100%; padding: 8px; margin-top: 6px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-family: Tahoma; }
+            .highlight { color: #e67e22; font-weight: bold; }
+            .alert { background: #d4edda; color: #155724; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; text-align: center; }
+            .flex { display: flex; gap: 10px; }
         </style>
     </head>
     <body>
+        {% if message %}
+        <div class="alert">{{ message }}</div>
+        {% endif %}
+
         <div class="card">
-            <h2>👤 حساب کاربری شما</h2>
+            <h2>👤 حساب کاربری</h2>
             <div class="info">
-                <p><b>نام مستعار:</b> {{ user.get('nickname', 'ثبت‌نشده') }}</p>
-                <p><b>موجودی سکه:</b> <span class="highlight">🪙 {{ user.get('coins', 0) }}</span></p>
+                <p><b>نام مستعار:</b> {{ user.get('nickname') }}</p>
+                <p><b>موجودی سکه:</b> <span class="highlight">🪙 {{ user.get('coins') }} سکه</span></p>
                 <p><b>آیدی عددی:</b> {{ chat_id }}</p>
-                <p><b>لینک دعوت شما:</b> <br><code>https://ble.ir/bot_username?start={{ chat_id }}</code></p>
+                
+                <form method="POST">
+                    <input type="hidden" name="action" value="setname">
+                    <input type="text" name="nickname" placeholder="تغییر نام مستعار..." required>
+                    <button type="submit" class="btn">ثبت نام مستعار</button>
+                </form>
             </div>
         </div>
+
         <div class="card">
-            <h2>🚀 بخش‌های ربات</h2>
-            <p class="info">برای ثبت سفارش ممبر، چرخش گردونه شانس، دریافت سکه از طریق بازدید کانال‌ها و انتقال سکه، به ربات تلگرام/بله مراجعه کنید!</p>
+            <h2>🎁 کسب درآمد و سکه رایگان</h2>
+            <div class="info">
+                <p><b>لینک دعوت شما:</b></p>
+                <input type="text" readonly value="https://ble.ir/bot_username?start={{ chat_id }}">
+                <p style="margin-top:8px; font-size:12px; color:#777;">با دعوت هر دوست، ۲۰ سکه هدیه بگیر!</p>
+                
+                <form method="POST" style="margin-top: 10px;">
+                    <input type="hidden" name="action" value="spin">
+                    <button type="submit" class="btn btn-warning">🎡 چرخش گردونه شانس (روزانه)</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>🎟️ کد هدیه</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="promo">
+                <input type="text" name="code" placeholder="مثال: KIALAND100" required>
+                <button type="submit" class="btn btn-success">ثبت و دریافت جایزه</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>🚀 ثبت سفارش ممبر</h2>
+            <div class="info" style="margin-bottom:8px; color:#e74c3c;">هر ممبر معادل ۲ سکه است.</div>
+            <form method="POST">
+                <input type="hidden" name="action" value="order">
+                <input type="text" name="channel" placeholder="آیدی یا لینک کانال (مثال: @my_channel)" required>
+                <input type="number" name="count" placeholder="تعداد ممبر درخواستی (مثال: 50)" min="10" required>
+                <button type="submit" class="btn">ثبت سفارش و کسر سکه</button>
+            </form>
+        </div>
+
+        <div class="card" style="text-align: center; color: #777; font-size: 12px;">
+            پشتیبانی: @kia_karfarma 💻
         </div>
     </body>
     </html>
     """
   return render_template_string(
-      html_template, user=user, chat_id=chat_id
+      html_template, user=user, chat_id=chat_id, message=message
   )
 
 
@@ -137,7 +272,6 @@ def handle_update(update):
   db = load_db()
   str_chat_id = str(chat_id)
 
-  # دستور /start و ثبت‌نام خودکار
   if text.startswith("/start"):
     if str_chat_id not in db["users"]:
       parts = text.split()
@@ -145,20 +279,19 @@ def handle_update(update):
 
       db["users"][str_chat_id] = {
           "nickname": f"کاربر_{chat_id}",
-          "coins": 50,  # جایزه ورود
+          "coins": 50,
           "ref_by": ref_id,
           "last_spin": None,
       }
 
       if ref_id and ref_id in db["users"] and ref_id != str_chat_id:
-        db["users"][ref_id]["coins"] += 20  # پاداش زیرمجموعه‌گیری
+        db["users"][ref_id]["coins"] += 20
 
       save_db(db)
       send_message(
           chat_id,
-          "سلام کیا جان! خوش اومدی. 🌺\n۵۰ سکه هدیه ورود به شما داده شد.\nلطفاً"
-          " نام مستعار خود را با دستور زیر ثبت کنید:\n/setname [نام"
-          " مستعار]",
+          "سلام کیا جان! خوش اومدی. 🌺\n۵۰ سکه هدیه ورود به شما داده شد.\nبرای"
+          " کار با مینی‌اپ روی دکمه مربوطه در ربات بزنید.",
       )
     else:
       send_message(
@@ -167,197 +300,9 @@ def handle_update(update):
           f" {db['users'][str_chat_id]['coins']}",
       )
 
-  elif text.startswith("/setname"):
-    parts = text.split(maxsplit=1)
-    if len(parts) > 1:
-      nickname = parts[1]
-      db["users"][str_chat_id]["nickname"] = nickname
-      save_db(db)
-      send_message(
-          chat_id, f"✅ نام مستعار شما با موفقیت به «{nickname}» تغییر یافت!"
-      )
-    else:
-      send_message(
-          chat_id, "❌ لطفاً نام مستعار خود را وارد کنید. مثال:\n/setname ممد"
-      )
-
-  elif text == "حساب کاربری" or text == "/profile":
-    u = db["users"].get(
-        str_chat_id, {"nickname": "ثبت‌نشده", "coins": 0}
-    )
-    send_message(
-        chat_id,
-        f"👤 **حساب کاربری شما:**\n\nنام مستعار: {u['nickname']}\nموجودی سکه: 🪙"
-        f" {u['coins']}\nآیدی عددی: {chat_id}",
-    )
-
-  elif text == "کسب درآمد" or text == "/earn":
-    send_message(
-        chat_id,
-        "🎁 **روش‌های افزایش سکه:**\n\n1️⃣ زیرمجموعه‌گیری: ارسال لینک دعوت به"
-        f" دوستان (هر دعوت = ۲۰ سکه)\nلینک دعوت شما:\n`https://ble.ir/bot?start={chat_id}`\n\n2️⃣"
-        " عضویت در کانال رسمی ربات: جایزه ۳۰ سکه‌ای (با دستور /join_official)\n3️⃣"
-        " گردونه شانس روزانه: دستور /spin\n4️⃣ استفاده از کد هدیه: دستور /promo"
-        " [کد]",
-    )
-
-  elif text == "/join_official":
-    # جایزه عضویت در کانال اطلاع‌رسانی (فرض بر تایید)
-    if "official_joined" not in db["users"][str_chat_id]:
-      db["users"][str_chat_id]["official_joined"] = True
-      db["users"][str_chat_id]["coins"] += 30
-      save_db(db)
-      send_message(
-          chat_id, "🎉 ۳۰ سکه جایزه عضویت در کانال @ettela_resani_member واریز شد!"
-      )
-    else:
-      send_message(
-          chat_id, "❌ شما قبلاً جایزه این کانال را دریافت کرده‌اید!"
-      )
-
-  elif text == "/spin":
-    # گردونه شانس هر ۲۴ ساعت
-    user_data = db["users"][str_chat_id]
-    last_spin = user_data.get("last_spin")
-    now = datetime.now()
-
-    if last_spin:
-      last_spin_time = datetime.fromisoformat(last_spin)
-      if now - last_spin_time < timedelta(hours=24):
-        remaining = timedelta(hours=24) - (now - last_spin_time)
-        hours, remainder = divmod(int(remaining.total_seconds()), 3600)
-        minutes, _ = divmod(remainder, 60)
-        send_message(
-            chat_id,
-            f"⏳ شما قبلاً گردونه را چرخانده‌اید!\nلطفاً {hours} ساعت و"
-            f" {minutes} دقیقه دیگر صبر کنید.",
-        )
-        return
-
-    reward = random.randint(0, 100)
-    user_data["coins"] += reward
-    user_data["last_spin"] = now.isoformat()
-    save_db(db)
-    send_message(
-        chat_id,
-        f"🎡 چرخش گردونه شانس انجام شد!\nشما برنده **{reward} سکه** شدید. 🪙",
-    )
-
-  elif text.startswith("/promo"):
-    parts = text.split()
-    if len(parts) > 1:
-      code = parts[1]
-      promo_codes = db.get("promo_codes", {})
-      if code in promo_codes:
-        p_data = promo_codes[code]
-        if p_data["uses"] > 0 and str_chat_id not in p_data["claimed_by"]:
-          p_data["uses"] -= 1
-          p_data["claimed_by"].append(str_chat_id)
-          db["users"][str_chat_id]["coins"] += p_data["reward"]
-          save_db(db)
-          send_message(
-              chat_id,
-              f"✅ کد هدیه با موفقیت اعمال شد! {p_data['reward']} سکه به شما"
-              " اضافه شد.",
-          )
-        else:
-          send_message(
-              chat_id, "❌ این کد هدیه منقضی شده یا قبلاً استفاده شده است."
-          )
-      else:
-        send_message(chat_id, "❌ کد هدیه نامعتبر است.")
-    else:
-      send_message(
-          chat_id, "❌ لطفاً کد هدیه را وارد کنید. مثال:\n/promo KIALAND100"
-      )
-
-  elif text.startswith("/transfer"):
-    # فرمت: /transfer [chat_id] [amount]
-    parts = text.split()
-    if len(parts) == 3:
-      target_id = parts[1]
-      try:
-        amount = int(parts[2])
-      except:
-        send_message(chat_id, "❌ مقدار سکه باید عدد باشد.")
-        return
-
-      if target_id not in db["users"]:
-        send_message(chat_id, "❌ کاربر مقصد در ربات ثبت‌نام نکرده است.")
-        return
-      if amount <= 0 or db["users"][str_chat_id]["coins"] < amount:
-        send_message(chat_id, "❌ موجودی کافی نیست یا مقدار نامعتبر است.")
-        return
-
-      db["users"][str_chat_id]["coins"] -= amount
-      db["users"][target_id]["coins"] += amount
-      save_db(db)
-      send_message(chat_id, f"✅ {amount} سکه با موفقیت به کاربر انتقال یافت.")
-      send_message(target_id, f"🎁 {amount} سکه از طرف کاربر {chat_id} دریافت کردید!")
-    else:
-      send_message(
-          chat_id,
-          "❌ فرمت دستور نادرست است. مثال:\n/transfer 123456789 50",
-      )
-
-  elif text.startswith("/order"):
-    # فرمت: /order [لینک کانال] [تعداد ممبر]
-    parts = text.split()
-    if len(parts) == 3:
-      channel_link = parts[1]
-      try:
-        count = int(parts[2])
-      except:
-        send_message(chat_id, "❌ تعداد ممبر باید عدد باشد.")
-        return
-
-      total_cost = count * 2  # هر ممبر ۲ سکه
-      if db["users"][str_chat_id]["coins"] < total_cost:
-        send_message(
-            chat_id,
-            f"❌ موجودی کافی نیست! هزینه کل: {total_cost} سکه (هر ممبر ۲ سکه).",
-        )
-        return
-
-      db["users"][str_chat_id]["coins"] -= total_cost
-      db["campaigns"].append({
-          "user_id": str_chat_id,
-          "channel": channel_link,
-          "requested": count,
-          "delivered": 0,
-      })
-      save_db(db)
-      send_message(
-          chat_id,
-          f"✅ کمپین ممبر شما با موفقیت ثبت شد!\nهزینه کسر شده: {total_cost}"
-          " سکه.",
-      )
-    else:
-      send_message(
-          chat_id,
-          "❌ فرمت دستور نادرست است. مثال:\n/order @my_channel 100",
-      )
-
-  elif text == "/support" or text == "پشتیبانی":
-    send_message(
-        chat_id,
-        "📞 **پشتیبانی و راهنما:**\nراه ارتباطی: @kia_karfarma\nراهنمای کار با"
-        " ربات در مینی‌اپ و منوها موجود است.",
-    )
-
-  # --- پنل ادمین ---
+  # --- پنل ادمین در چت ---
   elif chat_id == ADMIN_ID:
-    if text.startswith("/broadcast"):
-      msg_text = text.replace("/broadcast", "").strip()
-      if msg_text:
-        count = 0
-        for uid in db["users"]:
-          send_message(uid, f"📢 **اطلاعیه ادمین:**\n\n{msg_text}")
-          count += 1
-        send_message(chat_id, f"✅ پیام همگانی به {count} کاربر ارسال شد.")
-
-    elif text.startswith("/makecode"):
-      # فرمت: /makecode [کد] | [سکه] | [ظرفیت]
+    if text.startswith("/makecode"):
       try:
         content = text.replace("/makecode", "").strip()
         parts = [p.strip() for p in content.split("|")]
@@ -370,14 +315,10 @@ def handle_update(update):
         save_db(db)
         send_message(
             chat_id,
-            f"✅ کد هدیه `{code}` با پاداش {reward} سکه و ظرفیت {capacity} ساخته"
-            " شد.",
+            f"✅ کد هدیه `{code}` با پاداش {reward} سکه ساخته شد.",
         )
-      except Exception as e:
-        send_message(
-            chat_id,
-            "❌ فرمت ساخت کد نادرست است. مثال:\n/makecode EID1405 | 50 | 10",
-        )
+      except:
+        send_message(chat_id, "❌ فرمت: /makecode کد | سکه | ظرفیت")
 
 
 # --- ترد Keep-Alive ---
