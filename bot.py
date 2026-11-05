@@ -10,7 +10,7 @@ import requests
 app = Flask(__name__)
 
 # --- تنظیمات و توکن ربات ---
-TOKEN = "GAPGPTMASKTOKEN3elbqkbhv16X0X"  # توکن ربات بله
+TOKEN = "GAPGPTMASKTOKEN5l1tdhc7vxyX0X"  # توکن ربات بله
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 ADMIN_ID = 1708788049
 DB_FILE = "bot_database.json"
@@ -25,7 +25,14 @@ def load_db():
         "users": {},
         "campaigns": [],
         "promo_codes": {},
-        "channels": [],
+        "channels": [
+            {
+                "id": 1,
+                "link": "@ettela_resani_member",
+                "reward": 15,
+            },  # کانال نمونه برای بازدید
+            {"id": 2, "link": "@kia_channel_sample", "reward": 10},
+        ],
     }
     save_db(default_data)
     return default_data
@@ -34,7 +41,12 @@ def load_db():
       with open(DB_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
     except:
-      return {"users": {}, "campaigns": [], "promo_codes": {}, "channels": []}
+      return {
+          "users": {},
+          "campaigns": [],
+          "promo_codes": {},
+          "channels": [],
+      }
 
 
 def save_db(data):
@@ -63,7 +75,6 @@ def home():
 
 @app.route("/webapp", methods=["GET", "POST"])
 def webapp():
-  # گرفتن chat_id از URL (اگر تست مستقیم بود، پیش‌فرض ادمین قرار داده می‌شود)
   chat_id = request.args.get("chat_id")
   if not chat_id:
     chat_id = str(ADMIN_ID)
@@ -78,10 +89,15 @@ def webapp():
         "coins": 50,
         "ref_by": None,
         "last_spin": None,
+        "visited_channels": [],
     }
     save_db(db)
 
   user = db["users"][str_chat_id]
+  # اطمینان از وجود کلید visited_channels برای کاربران قدیمی
+  if "visited_channels" not in user:
+    user["visited_channels"] = []
+
   message = ""
 
   # پردازش اکشن‌های ارسال شده از مینی‌اپ
@@ -112,6 +128,32 @@ def webapp():
         message = f"🎉 تبریک! {reward} سکه از گردونه جایزه گرفتی!"
       else:
         message = "⏳ گردونه شانس هر ۲۴ ساعت یک‌بار قابل چرخش است!"
+
+    elif action == "visit_channel":
+      try:
+        ch_id = int(request.form.get("channel_id", 0))
+      except:
+        ch_id = 0
+
+      target_channel = None
+      for ch in db.get("channels", []):
+        if ch["id"] == ch_id:
+          target_channel = ch
+          break
+
+      if target_channel:
+        if ch_id not in user["visited_channels"]:
+          user["visited_channels"].append(ch_id)
+          user["coins"] += target_channel["reward"]
+          save_db(db)
+          message = (
+              f"✅ تبریک! {target_channel['reward']} سکه بابت بازدید از کانال"
+              " دریافت کردی."
+          )
+        else:
+          message = "❌ شما قبلاً پاداش این کانال را دریافت کرده‌اید."
+      else:
+        message = "❌ کانال مورد نظر یافت نشد."
 
     elif action == "promo":
       code = request.form.get("code", "").strip()
@@ -170,9 +212,11 @@ def webapp():
             .btn { background: #007bff; color: white; border: none; padding: 10px; border-radius: 8px; width: 100%; font-size: 14px; cursor: pointer; margin-top: 8px; font-weight: bold;}
             .btn-success { background: #28a745; }
             .btn-warning { background: #ffc107; color: #333; }
+            .btn-sm { padding: 6px; font-size: 12px; margin-top: 4px; }
             input, select { width: 100%; padding: 8px; margin-top: 6px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-family: Tahoma; }
             .highlight { color: #e67e22; font-weight: bold; }
             .alert { background: #d4edda; color: #155724; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; text-align: center; }
+            .channel-item { background: #f8f9fa; padding: 8px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
         </style>
     </head>
     <body>
@@ -198,15 +242,38 @@ def webapp():
         <div class="card">
             <h2>🎁 کسب درآمد و سکه رایگان</h2>
             <div class="info">
-                <p><b>لینک دعوت شما:</b></p>
+                <p><b>لینک دعوت شما (زیرمجموعه‌گیری):</b></p>
                 <input type="text" readonly value="https://ble.ir/bot_username?start={{ chat_id }}">
-                <p style="margin-top:8px; font-size:12px; color:#777;">با دعوت هر دوست، ۲۰ سکه هدیه بگیر!</p>
+                <p style="margin-top:6px; font-size:12px; color:#777;">با دعوت هر دوست، ۲۰ سکه هدیه بگیر!</p>
                 
-                <form method="POST" style="margin-top: 10px;">
+                <form method="POST" style="margin-top: 8px;">
                     <input type="hidden" name="action" value="spin">
                     <button type="submit" class="btn btn-warning">🎡 چرخش گردونه شانس (روزانه)</button>
                 </form>
             </div>
+        </div>
+
+        <div class="card">
+            <h2>📢 بازدید از کانال‌ها و دریافت سکه</h2>
+            <div class="info" style="margin-bottom: 8px;">ابتدا در کانال عضو شو، سپس روی دکمه دریافت پاداش بزن:</div>
+            {% for ch in channels %}
+            <div class="channel-item">
+                <div>
+                    <b>{{ ch.link }}</b> <span style="color: #27ae60;">(+{{ ch.reward }} سکه)</span>
+                </div>
+                <div>
+                    {% if ch.id in user.get('visited_channels', []) %}
+                    <span style="font-size:11px; color:#888;">✅ دریافت شده</span>
+                    {% else %}
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="action" value="visit_channel">
+                        <input type="hidden" name="channel_id" value="{{ ch.id }}">
+                        <button type="submit" class="btn btn-sm btn-success">دریافت پاداش</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
         </div>
 
         <div class="card">
@@ -236,7 +303,11 @@ def webapp():
     </html>
     """
   return render_template_string(
-      html_template, user=user, chat_id=chat_id, message=message
+      html_template,
+      user=user,
+      chat_id=chat_id,
+      channels=db.get("channels", []),
+      message=message,
   )
 
 
@@ -282,6 +353,7 @@ def handle_update(update):
           "coins": 50,
           "ref_by": ref_id,
           "last_spin": None,
+          "visited_channels": [],
       }
 
       if ref_id and ref_id in db["users"] and ref_id != str_chat_id:
@@ -289,7 +361,6 @@ def handle_update(update):
 
       save_db(db)
 
-    # ساخت دکمه شیشه‌ای حاوی چت‌آیدی اختصاصی کاربر برای ورود به مینی‌اپ
     webapp_url = (
         f"https://member-mini-app.onrender.com/webapp?chat_id={chat_id}"
     )
@@ -303,7 +374,7 @@ def handle_update(update):
     send_message(
         chat_id,
         "سلام کیا جان! خوش اومدی. 🌺\n۵۰ سکه هدیه ورود به شما داده"
-        " شد.\nبرای ورود به مینی‌اپ و مدیریت حساب روی دکمه زیر بزن:",
+        " شد.\nبرای کسب سکه و مدیریت حساب روی دکمه زیر بزن:",
         reply_markup=keyboard,
     )
 
