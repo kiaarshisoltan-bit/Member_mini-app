@@ -10,7 +10,7 @@ import requests
 app = Flask(__name__)
 
 # --- تنظیمات و توکن ربات ---
-TOKEN = "GAPGPTMASKTOKEN72fhck5gbhsX0X"  # توکن ربات بله
+TOKEN = "GAPGPTMASKTOKEN3elbqkbhv16X0X"  # توکن ربات بله
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 ADMIN_ID = 1708788049
 DB_FILE = "bot_database.json"
@@ -63,14 +63,15 @@ def home():
 
 @app.route("/webapp", methods=["GET", "POST"])
 def webapp():
+  # گرفتن chat_id از URL (اگر تست مستقیم بود، پیش‌فرض ادمین قرار داده می‌شود)
   chat_id = request.args.get("chat_id")
   if not chat_id:
-    return "❌ خطا: آیدی کاربر یافت نشد!"
+    chat_id = str(ADMIN_ID)
 
   db = load_db()
   str_chat_id = str(chat_id)
 
-  # اگر کاربر هنوز ثبت‌نام نکرده بود، خودکار ثبت‌نامش کنیم
+  # ثبت‌نام خودکار کاربر اگر وجود نداشت
   if str_chat_id not in db["users"]:
     db["users"][str_chat_id] = {
         "nickname": f"کاربر_{chat_id}",
@@ -172,7 +173,6 @@ def webapp():
             input, select { width: 100%; padding: 8px; margin-top: 6px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-family: Tahoma; }
             .highlight { color: #e67e22; font-weight: bold; }
             .alert { background: #d4edda; color: #155724; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; text-align: center; }
-            .flex { display: flex; gap: 10px; }
         </style>
     </head>
     <body>
@@ -288,17 +288,24 @@ def handle_update(update):
         db["users"][ref_id]["coins"] += 20
 
       save_db(db)
-      send_message(
-          chat_id,
-          "سلام کیا جان! خوش اومدی. 🌺\n۵۰ سکه هدیه ورود به شما داده شد.\nبرای"
-          " کار با مینی‌اپ روی دکمه مربوطه در ربات بزنید.",
-      )
-    else:
-      send_message(
-          chat_id,
-          f"سلام مجدد! حساب کاربری شما فعال است.\nموجودی سکه: 🪙"
-          f" {db['users'][str_chat_id]['coins']}",
-      )
+
+    # ساخت دکمه شیشه‌ای حاوی چت‌آیدی اختصاصی کاربر برای ورود به مینی‌اپ
+    webapp_url = (
+        f"https://member-mini-app.onrender.com/webapp?chat_id={chat_id}"
+    )
+    keyboard = {
+        "inline_keyboard": [[{
+            "text": "🚀 ورود به مینی‌اپ ممبرگیر",
+            "url": webapp_url,
+        }]]
+    }
+
+    send_message(
+        chat_id,
+        "سلام کیا جان! خوش اومدی. 🌺\n۵۰ سکه هدیه ورود به شما داده"
+        " شد.\nبرای ورود به مینی‌اپ و مدیریت حساب روی دکمه زیر بزن:",
+        reply_markup=keyboard,
+    )
 
   # --- پنل ادمین در چت ---
   elif chat_id == ADMIN_ID:
