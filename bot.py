@@ -10,7 +10,7 @@ import requests
 app = Flask(__name__)
 
 # --- تنظیمات و توکن ربات ---
-TOKEN = "GAPGPTMASKTOKEN5l1tdhc7vxyX0X"  # توکن ربات بله
+TOKEN = "GAPGPTMASKTOKENp4lol3h95u8X0X"  # توکن ربات بله
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 ADMIN_ID = 1708788049
 DB_FILE = "bot_database.json"
@@ -25,14 +25,6 @@ def load_db():
         "users": {},
         "campaigns": [],
         "promo_codes": {},
-        "channels": [
-            {
-                "id": 1,
-                "link": "@ettela_resani_member",
-                "reward": 15,
-            },  # کانال نمونه برای بازدید
-            {"id": 2, "link": "@kia_channel_sample", "reward": 10},
-        ],
     }
     save_db(default_data)
     return default_data
@@ -41,12 +33,7 @@ def load_db():
       with open(DB_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
     except:
-      return {
-          "users": {},
-          "campaigns": [],
-          "promo_codes": {},
-          "channels": [],
-      }
+      return {"users": {}, "campaigns": [], "promo_codes": {}}
 
 
 def save_db(data):
@@ -89,14 +76,13 @@ def webapp():
         "coins": 50,
         "ref_by": None,
         "last_spin": None,
-        "visited_channels": [],
+        "visited_campaigns": [],
     }
     save_db(db)
 
   user = db["users"][str_chat_id]
-  # اطمینان از وجود کلید visited_channels برای کاربران قدیمی
-  if "visited_channels" not in user:
-    user["visited_channels"] = []
+  if "visited_campaigns" not in user:
+    user["visited_campaigns"] = []
 
   message = ""
 
@@ -129,31 +115,33 @@ def webapp():
       else:
         message = "⏳ گردونه شانس هر ۲۴ ساعت یک‌بار قابل چرخش است!"
 
-    elif action == "visit_channel":
+    elif action == "visit_campaign":
       try:
-        ch_id = int(request.form.get("channel_id", 0))
+        camp_idx = int(request.form.get("campaign_index", -1))
       except:
-        ch_id = 0
+        camp_idx = -1
 
-      target_channel = None
-      for ch in db.get("channels", []):
-        if ch["id"] == ch_id:
-          target_channel = ch
-          break
+      campaigns = db.get("campaigns", [])
+      if 0 <= camp_idx < len(campaigns):
+        target_camp = campaigns[camp_idx]
 
-      if target_channel:
-        if ch_id not in user["visited_channels"]:
-          user["visited_channels"].append(ch_id)
-          user["coins"] += target_channel["reward"]
-          save_db(db)
-          message = (
-              f"✅ تبریک! {target_channel['reward']} سکه بابت بازدید از کانال"
-              " دریافت کردی."
-          )
-        else:
+        # کاربر نباید کانال خودش رو بازدید کنه و نباید قبلاً پاداش گرفته باشه
+        if target_camp["user_id"] == str_chat_id:
+          message = "❌ شما نمی‌توانید کانال خودتان را بازدید کنید."
+        elif camp_idx in user["visited_campaigns"]:
           message = "❌ شما قبلاً پاداش این کانال را دریافت کرده‌اید."
+        else:
+          # بررسی تکمیل ظرفیت کمپین
+          if target_camp.get("delivered", 0) < target_camp.get("requested", 0):
+            user["visited_campaigns"].append(camp_idx)
+            user["coins"] += 5  # پاداش هر بازدید ثابت ۵ سکه
+            target_camp["delivered"] += 1
+            save_db(db)
+            message = "✅ تبریک! ۵ سکه بابت بازدید از کانال دریافت کردی."
+          else:
+            message = "❌ ظرفیت این کمپین به اتمام رسیده است."
       else:
-        message = "❌ کانال مورد نظر یافت نشد."
+        message = "❌ کمپین مورد نظر یافت نشد."
 
     elif action == "promo":
       code = request.form.get("code", "").strip()
@@ -179,7 +167,7 @@ def webapp():
         count = 0
 
       cost = count * 2
-      if count > 0 and ch_link:
+      if count >= 10 and ch_link:
         if user["coins"] >= cost:
           user["coins"] -= cost
           db["campaigns"].append({
@@ -195,7 +183,7 @@ def webapp():
         else:
           message = "❌ موجودی سکه شما برای این تعداد ممبر کافی نیست!"
       else:
-        message = "❌ اطلاعات سفارش نامعتبر است."
+        message = "❌ حداقل تعداد سفارش باید ۱۰ ممبر باشد."
 
   html_template = """
     <!DOCTYPE html>
@@ -254,26 +242,38 @@ def webapp():
         </div>
 
         <div class="card">
-            <h2>📢 بازدید از کانال‌ها و دریافت سکه</h2>
-            <div class="info" style="margin-bottom: 8px;">ابتدا در کانال عضو شو، سپس روی دکمه دریافت پاداش بزن:</div>
-            {% for ch in channels %}
-            <div class="channel-item">
-                <div>
-                    <b>{{ ch.link }}</b> <span style="color: #27ae60;">(+{{ ch.reward }} سکه)</span>
-                </div>
-                <div>
-                    {% if ch.id in user.get('visited_channels', []) %}
-                    <span style="font-size:11px; color:#888;">✅ دریافت شده</span>
-                    {% else %}
-                    <form method="POST" style="display:inline;">
-                        <input type="hidden" name="action" value="visit_channel">
-                        <input type="hidden" name="channel_id" value="{{ ch.id }}">
-                        <button type="submit" class="btn btn-sm btn-success">دریافت پاداش</button>
-                    </form>
-                    {% endif %}
-                </div>
-            </div>
+            <h2>📢 بازدید از کانال‌های کاربران و دریافت سکه</h2>
+            <div class="info" style="margin-bottom: 8px;">عضو شو و ۵ سکه جایزه بگیر:</div>
+            {% set active_campaigns = [] %}
+            {% for idx in range(campaigns|length) %}
+                {% if campaigns[idx].delivered < campaigns[idx].requested and campaigns[idx].user_id != chat_id %}
+                    {% set _ = active_campaigns.append((idx, campaigns[idx])) %}
+                {% endif %}
             {% endfor %}
+
+            {% if active_campaigns|length == 0 %}
+            <div style="text-align: center; color: #777; font-size: 13px; padding: 10px;">در حال حاضر کانالی برای بازدید وجود ندارد. لطفا بعداً سر بزنید!</div>
+            {% else %}
+                {% for idx, camp in active_campaigns %}
+                <div class="channel-item">
+                    <div>
+                        <b>{{ camp.channel }}</b> <span style="color: #27ae60;">(+5 سکه)</span>
+                        <div style="font-size: 11px; color: #888;">پیشرفت: {{ camp.delivered }}/{{ camp.requested }}</div>
+                    </div>
+                    <div>
+                        {% if idx in user.get('visited_campaigns', []) %}
+                        <span style="font-size:11px; color:#888;">✅ دریافت شده</span>
+                        {% else %}
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="action" value="visit_campaign">
+                            <input type="hidden" name="campaign_index" value="{{ idx }}">
+                            <button type="submit" class="btn btn-sm btn-success">دریافت پاداش</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% endif %}
         </div>
 
         <div class="card">
@@ -287,7 +287,7 @@ def webapp():
 
         <div class="card">
             <h2>🚀 ثبت سفارش ممبر</h2>
-            <div class="info" style="margin-bottom:8px; color:#e74c3c;">هر ممبر معادل ۲ سکه است.</div>
+            <div class="info" style="margin-bottom:8px; color:#e74c3c;">هر ممبر معادل ۲ سکه است (حداقل ۱۰ ممبر).</div>
             <form method="POST">
                 <input type="hidden" name="action" value="order">
                 <input type="text" name="channel" placeholder="آیدی یا لینک کانال (مثال: @my_channel)" required>
@@ -306,7 +306,7 @@ def webapp():
       html_template,
       user=user,
       chat_id=chat_id,
-      channels=db.get("channels", []),
+      campaigns=db.get("campaigns", []),
       message=message,
   )
 
@@ -353,7 +353,7 @@ def handle_update(update):
           "coins": 50,
           "ref_by": ref_id,
           "last_spin": None,
-          "visited_channels": [],
+          "visited_campaigns": [],
       }
 
       if ref_id and ref_id in db["users"] and ref_id != str_chat_id:
