@@ -10,7 +10,7 @@ import requests
 app = Flask(__name__)
 
 # --- تنظیمات و توکن ربات ---
-TOKEN = "GAPGPTMASKTOKENp4lol3h95u8X0X"  # توکن ربات بله
+TOKEN = "GAPGPTMASKTOKENzboeu8q219nX0X"  # توکن ربات بله
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 ADMIN_ID = 1708788049
 DB_FILE = "bot_database.json"
@@ -125,16 +125,14 @@ def webapp():
       if 0 <= camp_idx < len(campaigns):
         target_camp = campaigns[camp_idx]
 
-        # کاربر نباید کانال خودش رو بازدید کنه و نباید قبلاً پاداش گرفته باشه
         if target_camp["user_id"] == str_chat_id:
           message = "❌ شما نمی‌توانید کانال خودتان را بازدید کنید."
         elif camp_idx in user["visited_campaigns"]:
           message = "❌ شما قبلاً پاداش این کانال را دریافت کرده‌اید."
         else:
-          # بررسی تکمیل ظرفیت کمپین
           if target_camp.get("delivered", 0) < target_camp.get("requested", 0):
             user["visited_campaigns"].append(camp_idx)
-            user["coins"] += 5  # پاداش هر بازدید ثابت ۵ سکه
+            user["coins"] += 5  # پاداش ثابت ۵ سکه برای هر بازدید
             target_camp["delivered"] += 1
             save_db(db)
             message = "✅ تبریک! ۵ سکه بابت بازدید از کانال دریافت کردی."
@@ -311,7 +309,7 @@ def webapp():
   )
 
 
-# --- ترد Polling بله ---
+# --- ترد Polling بله (مدیریت دستورات متنی کاملاً هماهنگ با مینی‌اپ) ---
 def bale_polling():
   offset = 0
   print("Bale Bot Polling Started...")
@@ -343,24 +341,27 @@ def handle_update(update):
   db = load_db()
   str_chat_id = str(chat_id)
 
+  # ثبت‌نام خودکار در صورت عدم وجود
+  if str_chat_id not in db["users"]:
+    parts = text.split()
+    ref_id = parts[1] if len(parts) > 1 and text.startswith("/start") else None
+
+    db["users"][str_chat_id] = {
+        "nickname": f"کاربر_{chat_id}",
+        "coins": 50,
+        "ref_by": ref_id,
+        "last_spin": None,
+        "visited_campaigns": [],
+    }
+
+    if ref_id and ref_id in db["users"] and ref_id != str_chat_id:
+      db["users"][ref_id]["coins"] += 20
+
+    save_db(db)
+
+  user = db["users"][str_chat_id]
+
   if text.startswith("/start"):
-    if str_chat_id not in db["users"]:
-      parts = text.split()
-      ref_id = parts[1] if len(parts) > 1 else None
-
-      db["users"][str_chat_id] = {
-          "nickname": f"کاربر_{chat_id}",
-          "coins": 50,
-          "ref_by": ref_id,
-          "last_spin": None,
-          "visited_campaigns": [],
-      }
-
-      if ref_id and ref_id in db["users"] and ref_id != str_chat_id:
-        db["users"][ref_id]["coins"] += 20
-
-      save_db(db)
-
     webapp_url = (
         f"https://member-mini-app.onrender.com/webapp?chat_id={chat_id}"
     )
@@ -373,9 +374,78 @@ def handle_update(update):
 
     send_message(
         chat_id,
-        "سلام کیا جان! خوش اومدی. 🌺\n۵۰ سکه هدیه ورود به شما داده"
-        " شد.\nبرای کسب سکه و مدیریت حساب روی دکمه زیر بزن:",
+        f"سلام {user.get('nickname')} عزیز! خوش اومدی. 🌺\nموجودی فعلی"
+        f" شما: 🪙 {user.get('coins')} سکه\n\nبرای استفاده از امکانات کامل،"
+        " روی دکمه زیر بزن:",
         reply_markup=keyboard,
+    )
+
+  elif text.startswith("/profile"):
+    send_message(
+        chat_id,
+        f"👤 **پروفایل شما:**\n\n- نام مستعار: {user.get('nickname')}\n- موجودی"
+        f" سکه: 🪙 {user.get('coins')}\n- آیدی عددی: {chat_id}",
+    )
+
+  elif text.startswith("/setname"):
+    parts = text.split(maxsplit=1)
+    if len(parts) > 1:
+      new_name = parts[1].strip()
+      user["nickname"] = new_name
+      save_db(db)
+      send_message(chat_id, f"✅ نام مستعار شما به «{new_name}» تغییر یافت.")
+    else:
+      send_message(
+          chat_id,
+          "❌ لطفاً نام جدید را وارد کنید.\nمثال: `/setname کیا`",
+      )
+
+  elif text.startswith("/transfer"):
+    parts = text.split()
+    if len(parts) == 3:
+      try:
+        target_id = parts[1].strip()
+        amount = int(parts[2])
+
+        if target_id == str_chat_id:
+          send_message(
+              chat_id, "❌ نمی‌توایند به خودتان سکه انتقال دهید!",
+          )
+        elif amount <= 0:
+          send_message(chat_id, "❌ مقدار سکه باید بزرگ‌تر از صفر باشد.")
+        elif user["coins"] < amount:
+          send_message(chat_id, "❌ موجودی سکه شما کافی نیست!")
+        else:
+          if target_id not in db["users"]:
+            send_message(
+                chat_id,
+                "❌ کاربر مورد نظر در ربات ثبت‌نام نکرده است.",
+            )
+          else:
+            user["coins"] -= amount
+            db["users"][target_id]["coins"] += amount
+            save_db(db)
+            send_message(
+                chat_id,
+                f"✅ موفقیت! {amount} سکه به کاربر {target_id} منتقل شد.",
+            )
+            send_message(
+                target_id,
+                f"🎁 شما مبلغ {amount} سکه از کاربر {str_chat_id} دریافت کردید!",
+            )
+      except ValueError:
+        send_message(chat_id, "❌ فرمت مقدار سکه نامعتبر است.")
+    else:
+      send_message(
+          chat_id,
+          "❌ فرمت دستور نادرست است.\nاستفاده صحیح: `/transfer [آیدی_مقصد]"
+          " [تعداد]`",
+      )
+
+  elif text == "/support" or text == "پشتیبانی":
+    send_message(
+        chat_id,
+        "💬 برای ارتباط با پشتیبانی، به آیدی زیر پیام دهید:\n👉 @kia_karfarma",
     )
 
   # --- پنل ادمین در چت ---
@@ -397,6 +467,23 @@ def handle_update(update):
         )
       except:
         send_message(chat_id, "❌ فرمت: /makecode کد | سکه | ظرفیت")
+
+    elif text.startswith("/broadcast"):
+      msg_text = text.replace("/broadcast", "").strip()
+      if msg_text:
+        success_count = 0
+        for uid in db["users"]:
+          try:
+            send_message(int(uid), f"📢 **پیام مدیریت:**\n\n{msg_text}")
+            success_count += 1
+          except:
+            pass
+        send_message(
+            chat_id,
+            f"✅ پیام همگانی با موفقیت به {success_count} کاربر ارسال شد.",
+        )
+      else:
+        send_message(chat_id, "❌ متن پیام خالی است.")
 
 
 # --- ترد Keep-Alive ---
