@@ -10,29 +10,27 @@ import requests
 app = Flask(__name__)
 
 # --- تنظیمات و توکن ربات ---
-TOKEN = "GAPGPTMASKTOKENi2n8eq1fqacX0X"  # توکن ربات بله
+TOKEN = "GAPGPTMASKTOKENbffbnswtraeX0X"  # توکن ربات بله
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 ADMIN_ID = 1708788049
 DB_FILE = "bot_database.json"
 
-# --- مدیریت دیتابیس JSON ---
+# --- مدیریت دیتابیس JSON با قفل ایمن ---
 db_lock = threading.Lock()
 
 
 def load_db():
-  if not os.path.exists(DB_FILE):
-    default_data = {
-        "users": {},
-        "campaigns": [],
-        "promo_codes": {},
-    }
-    save_db(default_data)
-    return default_data
   with db_lock:
+    if not os.path.exists(DB_FILE):
+      default_data = {"users": {}, "campaigns": [], "promo_codes": {}}
+      with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(default_data, f, ensure_ascii=False, indent=4)
+      return default_data
     try:
       with open(DB_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
-    except:
+    except Exception as e:
+      print(f"Error loading DB: {e}")
       return {"users": {}, "campaigns": [], "promo_codes": {}}
 
 
@@ -63,13 +61,13 @@ def home():
 @app.route("/webapp", methods=["GET", "POST"])
 def webapp():
   chat_id = request.args.get("chat_id")
-  if not chat_id:
+  if not chat_id or chat_id == "None":
     chat_id = str(ADMIN_ID)
 
-  db = load_db()
   str_chat_id = str(chat_id)
+  db = load_db()
 
-  # ثبت‌نام خودکار کاربر اگر وجود نداشت
+  # بررسی و ثبت‌نام خودکار کاربر اگر در دیتابیس نبود
   if str_chat_id not in db["users"]:
     db["users"][str_chat_id] = {
         "nickname": f"کاربر_{chat_id}",
@@ -79,6 +77,7 @@ def webapp():
         "visited_campaigns": [],
     }
     save_db(db)
+    db = load_db()  # ریلود مجدد دیتابیس
 
   user = db["users"][str_chat_id]
   if "visited_campaigns" not in user:
@@ -92,12 +91,13 @@ def webapp():
     if action == "setname":
       new_name = request.form.get("nickname", "").strip()
       if new_name:
-        user["nickname"] = new_name
+        db["users"][str_chat_id]["nickname"] = new_name
         save_db(db)
         message = "✅ نام مستعار با موفقیت تغییر کرد!"
 
     elif action == "spin":
-      last_spin = user.get("last_spin")
+      current_user = db["users"][str_chat_id]
+      last_spin = current_user.get("last_spin")
       now = datetime.now()
       can_spin = True
       if last_spin:
@@ -107,8 +107,8 @@ def webapp():
 
       if can_spin:
         reward = random.randint(10, 100)
-        user["coins"] += reward
-        user["last_spin"] = now.isoformat()
+        db["users"][str_chat_id]["coins"] += reward
+        db["users"][str_chat_id]["last_spin"] = now.isoformat()
         save_db(db)
         message = f"🎉 تبریک! {reward} سکه از گردونه جایزه گرفتی!"
       else:
@@ -121,17 +121,19 @@ def webapp():
         camp_idx = -1
 
       campaigns = db.get("campaigns", [])
+      current_user = db["users"][str_chat_id]
+
       if 0 <= camp_idx < len(campaigns):
         target_camp = campaigns[camp_idx]
 
         if target_camp["user_id"] == str_chat_id:
           message = "❌ شما نمی‌توانید کانال خودتان را بازدید کنید."
-        elif camp_idx in user["visited_campaigns"]:
+        elif camp_idx in current_user["visited_campaigns"]:
           message = "❌ شما قبلاً پاداش این کانال را دریافت کرده‌اید."
         else:
           if target_camp.get("delivered", 0) < target_camp.get("requested", 0):
-            user["visited_campaigns"].append(camp_idx)
-            user["coins"] += 5
+            current_user["visited_campaigns"].append(camp_idx)
+            current_user["coins"] += 5
             target_camp["delivered"] += 1
             save_db(db)
             message = "✅ تبریک! ۵ سکه بابت بازدید از کانال دریافت کردی."
@@ -143,12 +145,13 @@ def webapp():
     elif action == "promo":
       code = request.form.get("code", "").strip()
       promo_codes = db.get("promo_codes", {})
+      current_user = db["users"][str_chat_id]
       if code in promo_codes:
         p_data = promo_codes[code]
         if p_data["uses"] > 0 and str_chat_id not in p_data["claimed_by"]:
           p_data["uses"] -= 1
           p_data["claimed_by"].append(str_chat_id)
-          user["coins"] += p_data["reward"]
+          current_user["coins"] += p_data["reward"]
           save_db(db)
           message = f"✅ کد هدیه اعمال شد! {p_data['reward']} سکه اضافه شد."
         else:
@@ -164,9 +167,10 @@ def webapp():
         count = 0
 
       cost = count * 2
+      current_user = db["users"][str_chat_id]
       if count >= 10 and ch_link:
-        if user["coins"] >= cost:
-          user["coins"] -= cost
+        if current_user["coins"] >= cost:
+          current_user["coins"] -= cost
           db["campaigns"].append({
               "user_id": str_chat_id,
               "channel": ch_link,
@@ -181,6 +185,10 @@ def webapp():
           message = "❌ موجودی سکه شما برای این تعداد ممبر کافی نیست!"
       else:
         message = "❌ حداقل تعداد سفارش باید ۱۰ ممبر باشد."
+
+    # بارگذاری مجدد اطلاعات تازه برای نمایش دقیق بعد از ثبت POST
+    db = load_db()
+    user = db["users"][str_chat_id]
 
   html_template = """
     <!DOCTYPE html>
@@ -308,7 +316,7 @@ def webapp():
   )
 
 
-# --- ترد Polling بله (هماهنگ‌سازی کامل دستورات چت با مینی‌اپ) ---
+# --- ترد Polling بله ---
 def bale_polling():
   offset = 0
   print("Bale Bot Polling Started...")
@@ -340,7 +348,7 @@ def handle_update(update):
   db = load_db()
   str_chat_id = str(chat_id)
 
-  # ثبت‌نام خودکار
+  # ثبت‌نام خودکار در چت ربات
   if str_chat_id not in db["users"]:
     parts = text.split()
     ref_id = parts[1] if len(parts) > 1 and text.startswith("/start") else None
@@ -357,6 +365,7 @@ def handle_update(update):
       db["users"][ref_id]["coins"] += 20
 
     save_db(db)
+    db = load_db()
 
   user = db["users"][str_chat_id]
   if "visited_campaigns" not in user:
@@ -381,6 +390,8 @@ def handle_update(update):
     )
 
   elif text.startswith("/profile"):
+    db = load_db()
+    user = db["users"][str_chat_id]
     send_message(
         chat_id,
         f"👤 **پروفایل شما:**\n\n- نام مستعار: {user.get('nickname')}\n- موجودی"
@@ -391,7 +402,7 @@ def handle_update(update):
     parts = text.split(maxsplit=1)
     if len(parts) > 1:
       new_name = parts[1].strip()
-      user["nickname"] = new_name
+      db["users"][str_chat_id]["nickname"] = new_name
       save_db(db)
       send_message(chat_id, f"✅ نام مستعار شما به «{new_name}» تغییر یافت.")
     else:
@@ -400,7 +411,9 @@ def handle_update(update):
       )
 
   elif text.startswith("/spin"):
-    last_spin = user.get("last_spin")
+    db = load_db()
+    current_user = db["users"][str_chat_id]
+    last_spin = current_user.get("last_spin")
     now = datetime.now()
     can_spin = True
     if last_spin:
@@ -410,8 +423,8 @@ def handle_update(update):
 
     if can_spin:
       reward = random.randint(10, 100)
-      user["coins"] += reward
-      user["last_spin"] = now.isoformat()
+      db["users"][str_chat_id]["coins"] += reward
+      db["users"][str_chat_id]["last_spin"] = now.isoformat()
       save_db(db)
       send_message(
           chat_id, f"🎉 تبریک! {reward} سکه از گردونه شانس جایزه گرفتی!",
@@ -425,13 +438,15 @@ def handle_update(update):
     parts = text.split(maxsplit=1)
     if len(parts) > 1:
       code = parts[1].strip()
+      db = load_db()
       promo_codes = db.get("promo_codes", {})
+      current_user = db["users"][str_chat_id]
       if code in promo_codes:
         p_data = promo_codes[code]
         if p_data["uses"] > 0 and str_chat_id not in p_data["claimed_by"]:
           p_data["uses"] -= 1
           p_data["claimed_by"].append(str_chat_id)
-          user["coins"] += p_data["reward"]
+          current_user["coins"] += p_data["reward"]
           save_db(db)
           send_message(
               chat_id,
@@ -456,9 +471,11 @@ def handle_update(update):
       try:
         count = int(parts[2])
         cost = count * 2
+        db = load_db()
+        current_user = db["users"][str_chat_id]
         if count >= 10:
-          if user["coins"] >= cost:
-            user["coins"] -= cost
+          if current_user["coins"] >= cost:
+            current_user["coins"] -= cost
             db["campaigns"].append({
                 "user_id": str_chat_id,
                 "channel": ch_link,
@@ -488,12 +505,13 @@ def handle_update(update):
       try:
         target_id = parts[1].strip()
         amount = int(parts[2])
+        db = load_db()
 
         if target_id == str_chat_id:
           send_message(chat_id, "❌ نمی‌توانید به خودتان سکه انتقال دهید!")
         elif amount <= 0:
           send_message(chat_id, "❌ مقدار سکه باید بزرگ‌تر از صفر باشد.")
-        elif user["coins"] < amount:
+        elif db["users"][str_chat_id]["coins"] < amount:
           send_message(chat_id, "❌ موجودی سکه شما کافی نیست!")
         else:
           if target_id not in db["users"]:
@@ -501,7 +519,7 @@ def handle_update(update):
                 chat_id, "❌ کاربر مورد نظر در ربات ثبت‌نام نکرده است.",
             )
           else:
-            user["coins"] -= amount
+            db["users"][str_chat_id]["coins"] -= amount
             db["users"][target_id]["coins"] += amount
             save_db(db)
             send_message(
@@ -533,6 +551,7 @@ def handle_update(update):
         content = text.replace("/makecode", "").strip()
         parts = [p.strip() for p in content.split("|")]
         code, reward, capacity = parts[0], int(parts[1]), int(parts[2])
+        db = load_db()
         db["promo_codes"][code] = {
             "reward": reward,
             "uses": capacity,
@@ -549,6 +568,7 @@ def handle_update(update):
     elif text.startswith("/broadcast"):
       msg_text = text.replace("/broadcast", "").strip()
       if msg_text:
+        db = load_db()
         success_count = 0
         for uid in db["users"]:
           try:
